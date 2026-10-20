@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 class ContextStore:
     def __init__(self, path=":memory:"):
-        self.conn = sqlite3.connect(path)
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA_SQL)
 
