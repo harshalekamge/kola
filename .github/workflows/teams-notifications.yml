@@ -1,0 +1,94 @@
+
+name: Teams GitHub Notifications
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  notify-teams:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send notification to Teams
+        env:
+          WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          EVENT_URL: ${{ github.event.pull_request.html_url }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          COMMIT_URL: ${{ github.event.head_commit.url }}
+        run: |
+          python - <<'PY'
+          import os, json, urllib.request
+
+          event = os.environ["EVENT_NAME"]
+          repo = os.environ["REPOSITORY"]
+          actor = os.environ["ACTOR"]
+
+          if event == "push":
+              title = "New Commit"
+              detail = os.environ.get("COMMIT_MESSAGE", "")
+              url = os.environ.get("COMMIT_URL", "")
+              branch = os.environ["REF_NAME"]
+          else:
+              action = os.environ.get("EVENT_ACTION", "")
+              merged = os.environ.get("PR_MERGED") == "true"
+              title = (
+                  "Pull Request Merged" if merged else
+                  "New Pull Request" if action == "opened" else
+                  f"Pull Request {action}"
+              )
+              detail = os.environ.get("PR_TITLE", "")
+              url = os.environ.get("EVENT_URL", "")
+              branch = os.environ["REF_NAME"]
+
+          card = {
+              "@type": "MessageCard",
+              "@context": "https://schema.org/extensions",
+              "summary": title,
+              "themeColor": "2F80ED",
+              "title": title,
+              "sections": [{
+                  "activityTitle": repo,
+                  "facts": [
+                      {"name": "Author", "value": actor},
+                      {"name": "Branch", "value": branch},
+                      {"name": "Details", "value": detail[:500]}
+                  ],
+                  "markdown": True
+              }],
+              "potentialAction": [{
+                  "@type": "OpenUri",
+                  "name": "View on GitHub",
+                  "targets": [{"os": "default", "uri": url or f"https://github.com/{repo}"}]
+              }]
+          }
+
+          webhook = os.environ.get("WEBHOOK_URL", "")
+          if not webhook:
+              raise SystemExit("TEAMS_WEBHOOK_URL secret is missing")
+
+          request = urllib.request.Request(
+              webhook,
+              data=json.dumps(card).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              print("Teams webhook response:", response.status)
+          PY
